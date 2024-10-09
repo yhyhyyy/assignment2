@@ -1,0 +1,181 @@
+---
+title: "assignment2"
+author: "Haoyu"
+format: html
+editor: visual
+embed-resources: true
+---
+
+## Data Wrangling
+```{r}
+library(dplyr)
+
+individual_data <- read.csv("https://raw.githubusercontent.com/USCbiostats/data-science-data/refs/heads/master/01_chs/chs_individual.csv")
+regional_data <- read.csv("https://raw.githubusercontent.com/USCbiostats/data-science-data/refs/heads/master/01_chs/chs_regional.csv")
+merged_data <- merge(individual_data, regional_data, by = "townname")
+
+nrow(merged_data) 
+mode_function <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+
+merged_data <- merged_data %>%
+  group_by(male, hispanic) %>%
+  mutate(across(where(~ all(. %in% c(0,1,2,3,4,5,NA))), 
+           ~ ifelse(is.na(.), mode_function(.), .)),
+         across(where(is.numeric), ~ ifelse(is.na(.), mean(., na.rm = TRUE), .))
+         )
+
+merged_data <- merged_data %>%
+  mutate(obesity_level = case_when(
+    bmi < 14 ~ "underweight",
+    bmi >= 14 & bmi <= 22 ~ "normal",
+    bmi > 22 & bmi <= 24 ~ "overweight",
+    bmi > 24 ~ "obese"
+  ))
+obesity_summary <- merged_data %>%
+  group_by(obesity_level) %>%
+  summarise(min_bmi = min(bmi, na.rm = TRUE),
+            max_bmi = max(bmi, na.rm = TRUE),
+            total_count = n())
+str(merged_data)
+obesity_summary
+
+merged_data <- merged_data %>%
+  mutate(smoke_gas_exposure = case_when(
+    smoke == 1 & gasstove == 1 ~ "Both",
+    smoke == 1 ~ "Second Hand Smoke Only",
+    gasstove == 1 ~ "Gas Stove Only",
+    TRUE ~ "None"
+  ))
+
+summary_town <- merged_data %>%
+  group_by(townname) %>%
+  summarise(avg_FEV = mean(fev, na.rm = TRUE),
+            sd_FEV = sd(fev, na.rm = TRUE))
+summary_sex <- merged_data %>%
+  group_by(male) %>%
+  summarise(avg_FEV = mean(fev, na.rm = TRUE),
+            sd_FEV = sd(fev, na.rm = TRUE))
+summary_obesity <- merged_data %>%
+  group_by(obesity_level) %>%
+  summarise(avg_FEV = mean(fev, na.rm = TRUE),
+            sd_FEV = sd(fev, na.rm = TRUE))
+summary_smoke_gas <- merged_data %>%
+  group_by(smoke_gas_exposure) %>%
+  summarise(avg_FEV = mean(fev, na.rm = TRUE),
+            sd_FEV = sd(fev, na.rm = TRUE))
+```
+
+## Looking at the Data
+1. What is the association between BMI and FEV (forced expiratory volume)?
+```{r}
+library(ggplot2)
+ggplot(merged_data, aes(x = bmi, y = fev)) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "blue", se = FALSE) +  
+  labs(title = "BMI vs FEV",
+       x = "BMI",
+       y = "FEV") +
+  theme_minimal()
+model_bmi_fev <- lm(fev ~ bmi, data = merged_data)
+summary(model_bmi_fev)
+cor(merged_data$bmi, merged_data$fev, use = "complete.obs")
+
+```
+From the result and plot, p-value less than 0.05, which means that BMI and FEV have positive linear correlation. The obtained correlation coefficient is 0.35, which means that there is a certain correlation between the increase in BMI and the increase in FEV, but the correlation is not strong.
+
+2. What is the association between smoke and gas exposure and FEV?
+```{r}
+anova_result <- aov(fev ~ smoke_gas_exposure, data = merged_data)
+summary(anova_result)
+
+ggplot(merged_data, aes(x = smoke_gas_exposure, y = fev)) +
+  geom_boxplot() +
+  labs(title = "FEV by Smoke and Gas Exposure",
+       x = "Smoke and Gas Exposure",
+       y = "FEV") +
+  theme_minimal()
+model_bmi_fev <- lm(fev ~ bmi, data = merged_data)
+summary(model_bmi_fev)
+```
+From the plot and statistical results. I don't think there is a strong correlation between smoke and gas exposure and FEV（P-value > 0.005）
+
+3. What is the association between PM2.5 exposure and FEV?
+```{r}
+city_fev <- merged_data %>%
+  group_by(townname) %>%
+  summarise(avg_FEV = mean(fev, na.rm = TRUE),
+            pm25 = unique(pm25_mass))  
+summary(lm(avg_FEV ~ pm25, data = city_fev))
+summary(lm(fev ~ pm25_mass, data = merged_data))
+
+ggplot(city_fev, aes(x = pm25, y = avg_FEV)) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +  
+  labs(title = "Association between PM2.5 Exposure and Average FEV by City",
+       x = "PM2.5 Concentration",
+       y = "Average Forced Expiratory Volume (FEV)") +
+  theme_minimal()
+```
+
+## Visualization
+1. Facet plot showing scatterplots with regression lines of BMI vs FEV by “townname”.
+```{r}
+ggplot(merged_data, aes(x = bmi, y = fev)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  facet_wrap(~ townname) +
+  labs(title = "BMI vs FEV by Town", x = "BMI", y = "FEV")
+```
+
+2. Stacked histograms of FEV by BMI category and FEV by smoke/gas exposure. Use different color schemes than the ggplot default.
+```{r}
+ggplot(merged_data, aes(x = fev, fill = obesity_level)) +
+  geom_histogram(position = "stack", bins = 30) +
+  scale_fill_brewer(palette = "RdPu") +
+  labs(title = "FEV by BMI Category", x = "FEV", fill = "Obesity Level")
+
+ggplot(merged_data, aes(x = fev, fill = smoke_gas_exposure)) +
+  geom_histogram(position = "stack", bins = 30) +
+  scale_fill_brewer(palette = "RdPu") +
+  labs(title = "FEV by Smoke/Gas Exposure", x = "FEV", fill = "Smoke/Gas Exposure")
+
+
+```
+
+3. Barchart of BMI by smoke/gas exposure.
+```{r}
+ggplot(merged_data, aes(x = smoke_gas_exposure, fill = obesity_level)) +
+  geom_bar(position = "dodge") +
+  labs(title = "BMI by Smoke/Gas Exposure", x = "Smoke/Gas Exposure", y = "Count")
+
+```
+
+4. Statistical summary graphs of FEV by BMI and FEV by smoke/gas exposure category.
+```{r}
+ggplot(merged_data, aes(x = obesity_level, y = fev)) +
+  geom_boxplot() +
+  labs(title = "FEV by Obesity Level", x = "Obesity Level", y = "FEV")
+
+ggplot(merged_data, aes(x = smoke_gas_exposure, y = fev)) +
+  geom_boxplot() +
+  labs(title = "FEV by Smoke/Gas Exposure", x = "Smoke/Gas Exposure", y = "FEV")
+
+```
+
+5. A leaflet map showing the concentrations of PM2.5 mass in each of the CHS communities.
+```{r}
+library(leaflet)
+
+leaflet(data = merged_data) %>%
+  addTiles() %>%
+  addCircles(lng = ~lon, lat = ~lat, weight = 1,
+             radius = ~pm25_mass * 300, popup = ~paste(townname, ":", pm25_mass), 
+             color = "blue", fillOpacity = 0.5)
+
+```
+
+6. 
